@@ -29,16 +29,8 @@
       text-align: center;
     }
 
-    h1 {
-      margin: 0 0 8px;
-      font-size: 22px;
-    }
-
-    p {
-      margin: 0 0 16px;
-      font-size: 14px;
-      color: #666;
-    }
+    h1 { margin: 0 0 8px; font-size: 22px; }
+    p { margin: 0 0 16px; font-size: 14px; color: #666; }
 
     input {
       width: 100%;
@@ -63,21 +55,22 @@
 
     .start { background: #4CAF50; color: white; }
     .stop  { background: #f44336; color: white; }
+    .send  { background: #2196F3; color: white; }
+    .cancel{ background: #9E9E9E; color: white; }
 
-    button:disabled {
-      opacity: .6;
-      cursor: not-allowed;
-    }
+    button:disabled { opacity: .6; cursor: not-allowed; }
 
-    audio {
-      width: 100%;
-      margin-top: 16px;
-    }
+    audio { width: 100%; margin-top: 16px; }
 
     .status {
       margin-top: 12px;
       font-size: 14px;
       color: #333;
+    }
+
+    .confirm-box {
+      margin-top: 12px;
+      display: none;
     }
   </style>
 </head>
@@ -85,28 +78,40 @@
 
 <div class="card">
   <h1>🎙 Ghi âm</h1>
-  <p>Nhập mã → ghi âm → lưu Google Drive</p>
+  <p>Nhập mã → ghi âm → xác nhận → lưu Google Drive</p>
 
   <input id="secret" placeholder="🔐 Nhập mã bảo mật" />
 
   <button class="start" id="start">▶ Bắt đầu ghi âm</button>
-  <button class="stop" id="stop" disabled>⏹ Dừng & Gửi</button>
+  <button class="stop" id="stop" disabled>⏹ Dừng ghi</button>
 
   <audio id="audio" controls></audio>
+
+  <!-- Xác nhận gửi -->
+  <div class="confirm-box" id="confirmBox">
+    <button class="send" id="send">📤 Gửi file</button>
+    <button class="cancel" id="cancel">❌ Ghi lại</button>
+  </div>
+
   <div class="status" id="status"></div>
 </div>
 
 <script>
   let recorder;
   let chunks = [];
+  let recordedBlob = null;
 
-  const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbzVNcbxghGGz3OfANUeAA2KiJOuS1WSZQzisqSThKXBsiaP-K7icJ1lW1Rdrh3aRTowsA/exec";
+  const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbw48oWmk4XPTYdbvk69s0_BoeKh4vsw4rN-ngkOhiMPh0WdjFPWXtEq4lyie_ac0596vw/exec";
 
   const startBtn = document.getElementById("start");
   const stopBtn = document.getElementById("stop");
+  const sendBtn = document.getElementById("send");
+  const cancelBtn = document.getElementById("cancel");
+
   const audio = document.getElementById("audio");
   const status = document.getElementById("status");
   const secretInput = document.getElementById("secret");
+  const confirmBox = document.getElementById("confirmBox");
 
   startBtn.onclick = async () => {
     if (!secretInput.value.trim()) {
@@ -122,6 +127,7 @@
     recorder.ondataavailable = e => chunks.push(e.data);
 
     status.textContent = "🎙 Đang ghi âm...";
+    confirmBox.style.display = "none";
     startBtn.disabled = true;
     stopBtn.disabled = false;
   };
@@ -129,34 +135,46 @@
   stopBtn.onclick = () => {
     recorder.stop();
     stopBtn.disabled = true;
+    status.textContent = "🎧 Nghe lại và xác nhận gửi";
+
+    recorder.onstop = () => {
+      recordedBlob = new Blob(chunks, { type: "audio/webm" });
+      audio.src = URL.createObjectURL(recordedBlob);
+      confirmBox.style.display = "block";
+      startBtn.disabled = false;
+    };
+  };
+
+  sendBtn.onclick = async () => {
     status.textContent = "⏳ Đang gửi file...";
 
-    recorder.onstop = async () => {
-      const blob = new Blob(chunks, { type: "audio/webm" });
-      audio.src = URL.createObjectURL(blob);
+    const base64 = await blobToBase64(recordedBlob);
 
-      const base64 = await blobToBase64(blob);
+    fetch(WEB_APP_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        audio: base64,
+        key: secretInput.value.trim()
+      })
+    })
+    .then(res => res.text())
+    .then(msg => {
+      status.textContent = msg === "OK"
+        ? "✅ Đã lưu vào Google Drive"
+        : "❌ Mã không hợp lệ";
+      confirmBox.style.display = "none";
+    })
+    .catch(() => {
+      status.textContent = "❌ Lỗi kết nối";
+    });
+  };
 
-      fetch(WEB_APP_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
-          audio: base64,
-          key: secretInput.value.trim()
-        })
-      })
-      .then(res => res.text())
-      .then(msg => {
-        status.textContent = msg === "OK"
-          ? "✅ Đã lưu vào Google Drive"
-          : "❌ Mã không hợp lệ";
-        startBtn.disabled = false;
-      })
-      .catch(() => {
-        status.textContent = "❌ Lỗi kết nối";
-        startBtn.disabled = false;
-      });
-    };
+  cancelBtn.onclick = () => {
+    recordedBlob = null;
+    audio.src = "";
+    confirmBox.style.display = "none";
+    status.textContent = "❌ Đã huỷ, hãy ghi lại";
   };
 
   function blobToBase64(blob) {
